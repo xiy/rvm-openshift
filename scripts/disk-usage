@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+
+rvm_base_except="selector"
+source "$rvm_scripts_path/base"
+
+usage()
+{
+  printf "%b" \
+"Usage: 'rvm disk-usage {all,total,archives,repos,sources,logs,pkg,rubies,gemsets,wrappers,tmp,others}'
+       Lists the space rvm uses for a given item(s).
+"
+  exit 1
+}
+
+disk_usage()
+{
+  typeset path name
+  name="$1"
+  path="$2"
+  shift 2
+  printf "%${length}s" "${name} Usage: "
+  if [[ -n "$path" && -d "$path" && "$path" != "/" ]]
+  then
+    du -hs "$@" "${path}/" | awk '{print $1}'
+  else
+    echo "0B"
+  fi
+  return 0
+}
+
+all_disk_usage()
+{
+  typeset name
+  export length=30
+  for name in archives repos sources logs pkg \
+    rubies gemsets wrappers temporary others total
+  do
+    ${name}_disk_usage
+  done
+}
+
+archives_disk_usage()  { disk_usage "Downloaded Archives"   "archives"; }
+repos_disk_usage()     { disk_usage "Repositories"          "repos";    }
+sources_disk_usage()   { disk_usage "Extracted Source Code" "src";      }
+logs_disk_usage()      { disk_usage "Log Files"             "log";      }
+pkg_disk_usage()       { disk_usage "Packages"              "usr";      }
+rubies_disk_usage()    { disk_usage "Rubies"                "rubies";   }
+gemsets_disk_usage()   { disk_usage "Gemsets"               "gems";     }
+wrappers_disk_usage()  { disk_usage "Wrappers"              "wrappers"; }
+temporary_disk_usage() { disk_usage "Temporary Files"       "tmp";      }
+total_disk_usage()     { disk_usage "Total Disk"            ".";        }
+others_disk_usage()
+{
+  typeset flag filter
+  typeset -a flags
+
+  if du --exclude=* . 2>/dev/null 1>/dev/null
+  then flag="--exclude="
+  else flag="-I "
+  fi
+
+  for filter in archives repos src log usr rubies gems wrappers tmp
+  do flags+=( ${flag}${filter} )
+  done
+
+  disk_usage "Other Files" "." "${flags[@]}"
+}
+
+case "${1:-help}" in
+  all|total|archives|repos|sources|logs|pkg|rubies|gemsets|wrappers|tmp|others)
+    (
+      export length=""
+      cd $rvm_path
+      $1_disk_usage
+    )
+    ;;
+  help|*)
+    usage
+    ;;
+esac

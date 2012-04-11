@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+__rvm_meta()
+{
+  rvm_meta_author="Wayne E. Seguin"
+  rvm_meta_author_email="wayneeseguin@gmail.com"
+  rvm_meta_authors=(
+    "Wayne E. Seguin <wayneeseguin@gmail.com>"
+    "Michal Papis <mpapis@gmail.com>"
+  )
+  rvm_meta_website="https://rvm.io/"
+  rvm_meta_version="${rvm_version}"
+}
+
+__rvm_version()
+{
+  __rvm_meta
+
+  typeset IFS release
+  IFS=':'
+  rvm_meta_authors="${rvm_meta_authors[*]}"
+  rvm_meta_authors="${rvm_meta_authors//:/, }"
+
+  echo -e "\nrvm ${rvm_meta_version} by ${rvm_meta_authors} [${rvm_meta_website}]\n"
+}

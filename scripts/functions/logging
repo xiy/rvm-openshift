@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+
+# Logging functions
+
+# check if user wants colors and if output goes to terminal
+# rvm_pretty_print_flag:
+# - 0|no    - disabled always
+# - 1|auto  - automatic depending if the output goes to terminal (default)
+# - 2|force - forced always
+# to select which terminal output should be checked use first param:
+# - stdout - for stdout (default)
+# - stderr - for stderr
+# - number - for the given terminal fd
+# - else   - for both stdout and stderr
+rvm_pretty_print()
+{
+  case "${rvm_pretty_print_flag:=auto}" in
+    (0|no)
+      return 1
+      ;;
+    (1|auto)
+      case "${TERM:-dumb}" in
+        (dumb|unknown) return 1 ;;
+      esac
+      case "$1" in
+        (stdout)      [[ -t 1           ]] || return 1 ;;
+        (stderr)      [[ -t 2           ]] || return 1 ;;
+        ([[:digit:]]) [[ -t $1          ]] || return 1 ;;
+        (any)         [[ -t 1  || -t 2  ]] || return 1 ;;
+        (*)           [[ -t 1  && -t 2  ]] || return 1 ;;
+      esac
+      return 0
+      ;;
+    (2|force)
+      return 0
+      ;;
+  esac
+}
+
+case "${TERM:-dumb}" in
+  (dumb|unknown)
+    rvm_error_clr=""
+    rvm_warn_clr=""
+    rvm_debug_clr=""
+    rvm_notify_clr=""
+    rvm_reset_clr=""
+    ;;
+  (*)
+    rvm_error_clr="$(  "${rvm_scripts_path:-${rvm_pat}/scripts}/color" "${rvm_error_color:-red}"     )"
+    rvm_warn_clr="$(   "${rvm_scripts_path:-${rvm_pat}/scripts}/color" "${rvm_warn_color:-yellow}"   )"
+    rvm_debug_clr="$(  "${rvm_scripts_path:-${rvm_pat}/scripts}/color" "${rvm_debug_color:-magenta}" )"
+    rvm_notify_clr="$( "${rvm_scripts_path:-${rvm_pat}/scripts}/color" "${rvm_notify_color:-green}"  )"
+    rvm_reset_clr="$(  "${rvm_scripts_path:-${rvm_pat}/scripts}/color" "${rvm_reset_color:-reset}"   )"
+    ;;
+esac
+
+rvm_error()
+{
+  if rvm_pretty_print stderr
+  then printf "%b" "${rvm_error_clr:-}$*${rvm_reset_clr:-}\n"
+  else printf "%b" "$*\n"
+  fi >&2
+}
+rvm_warn()
+{
+  if rvm_pretty_print stdout
+  then printf "%b" "${rvm_warn_clr:-}$*${rvm_reset_clr:-}\n"
+  else printf "%b" "$*\n"
+  fi
+}
+rvm_debug()
+{
+  if rvm_pretty_print stdout
+  then printf "%b" "${rvm_debug_clr:-}$*${rvm_reset_clr:-}\n"
+  else printf "%b" "$*\n"
+  fi
+}
+rvm_log()
+{
+  if rvm_pretty_print stdout
+  then printf "%b" "${rvm_notify_clr:-}$*${rvm_reset_clr:-}\n"
+  else printf "%b" "$*\n"
+  fi
+}

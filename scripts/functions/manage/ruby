@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+
+transform_configure_flags()
+{
+  typeset flag path
+  typeset -a new_flags
+
+  for flag in ${rvm_configure_flags}
+  do
+    case "${flag}" in
+      --with-opt-dir=*)
+        new_flags+=( "${flag}" )
+        ;;
+
+      --with-*-dir=*)
+        path="${flag#*=}"
+        flag="${flag%-dir=*}"
+
+        new_flags+=( "${flag}" )
+
+        if ! [[ " ${new_flags[*]} " =~ " --with-opt-dir=${path} " ]]
+        then new_flags+=( "--with-opt-dir=${path}" )
+        fi
+        ;;
+
+      *)
+        new_flags+=( "${flag}" )
+        ;;
+    esac
+  done
+
+  rvm_configure_flags="${new_flags[*]}"
+}
+
+# 1.9.3-p125+
+__clang_ready()
+{
+  typeset _patch_level
+  case ${rvm_ruby_string} in
+    ruby-1.9.3-head*|ruby-2*)
+      return 0
+      ;;
+    ruby-1.9.3*)
+      _patch_level="${rvm_ruby_patch_level:-p0}"
+      _patch_level="${_patch_level#p}"
+      (( _patch_level >= 125 )) && return 0 || true
+      ;;
+  esac
+  return 1
+}
+
+ruby_install()
+{
+  typeset result
+
+  __rvm_check_for_bison # && Run like hell...
+  if __rvm_check_for_bison
+  then true
+  else
+    result=$?
+    rvm_log "Bison required but not found. Halting."
+    exit $result
+  fi
+
+  case ${rvm_ruby_string:-""} in
+    ruby-1.8*|ree*|ruby-1.9*)
+      true # carry on then, nothing to see here :P
+      ;;
+    ruby-head|1.9.*-head)
+      if __rvm_ensure_has_mri_ruby "1.8.|ree"
+      then true
+      else return $?
+      fi
+      ;;
+  esac
+
+  case ${rvm_ruby_string} in
+    ruby-1.9*)
+      # Ruby 1.9 should now use libyaml which is for Psych.
+      if ! libyaml_installed
+      then libyaml # Installs libyaml
+      fi
+      rvm_configure_flags="${rvm_configure_flags:-} --with-libyaml-dir=${rvm_path}/usr"
+
+      # In some cases ruby does not allow --with-<lib>-dir,
+      # so we transform it to --with-<lib> --with-opt-dir=...
+      # see https://github.com/wayneeseguin/rvm/issues/674
+      transform_configure_flags
+      ;;
+  esac
+
+  # Temporary solution for this bug http://bugs.ruby-lang.org/issues/5384
+  case "$(uname -s)" in
+    SunOS)
+      case ${rvm_ruby_string} in
+        ruby-1.9*)
+          rvm_configure_flags="${rvm_configure_flags:-} ac_cv_func_dl_iterate_phdr=no"
+          ;;
+      esac
+    ;;
+  esac
+
+  __rvm_setup_compile_environment
+
+  # Force using clang when only LLVM available and user did not selected compiler,
+  # hides the need for `rvm_force_autoconf=1`
+  # which should be default, but is not by default available on Xcode 4.3.
+  if [[ "$MACHTYPE" == *darwin* ]] &&
+    __clang_ready && __rvm_compiler_is_llvm &&
+    ! __rvm_selected_compiler > /dev/null
+  then
+    rvm_configure_flags="${rvm_configure_flags:-""} --with-gcc=clang"
+  fi
+
+  if ! __clang_ready && __rvm_compiler_is_llvm
+  then
+    if __rvm_selected_compiler > /dev/null
+    then
+      rvm_warn "Building '${rvm_ruby_string}' using clang - but it's not (fully) supported, expect errors."
+    else
+      rvm_error "The provided compiler '$(__rvm_found_compiler)' is LLVM based, it is not yet fully supported by ruby and gems, please read \`rvm requirements\`."
+      exit 1
+    fi
+  fi
+
+  ( __rvm_install_source $* )
+  result=$?
+
+  if ! __clang_ready &&__rvm_compiler_is_llvm
+  then
+    rvm_warn "Ruby '${rvm_ruby_string}' was build using clang - but it's not (fully) supported, expect errors."
+  fi
+
+  typeset patches_count
+  patches_count=$(
+    rvm_ruby_string="${rvm_ruby_string}" "$rvm_scripts_path/patchsets" show default | wc -l
+  )
+  # 1.9.3 provides a patch to compile better with LLVM
+  if [[ ! "${rvm_ruby_string}" =~ "ruby-1.9.3" ]] && (( patches_count > 0 ))
+  then
+    rvm_warn "Please be aware that you just installed a ruby that requires ${patches_count} patches just to be compiled on up to date linux system.
+This may have known and unaccounted for security vulnerabilities.
+Please consider upgrading to Ruby $(__rvm_db "ruby_version")-$(__rvm_db "ruby_patchlevel") which will have all of the latest security patches."
+  fi
+
+  return ${result:-0}
+}

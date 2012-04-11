@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+
+unset GREP_OPTIONS
+source "$rvm_scripts_path/base"
+
+usage()
+{
+  printf "%b" "
+
+  Usage:
+
+    rvm upgrade [source ruby] [destination ruby]
+
+  Description:
+
+    Upgrades the specified (already installed) source ruby given to the
+    given destination ruby version. Will migrate gemsets, wrappers, aliases
+    and environment files.
+
+    To upgrade rvm itself you want 'rvm get'.
+
+  Examples:
+
+    $ rvm upgrade 1.9.2-p136 1.9.2-p180
+
+    $ rvm upgrade ree-2011.01 ree-2011-02
+
+"
+}
+
+confirm()
+{
+
+  typeset confirmation_response
+
+  printf "%b" "$1 (Y/n): "
+
+  read -r confirmation_response
+
+  if [[ -n "$confirmation_response" ]]
+  then
+    echo $confirmation_response | \grep -i '^y\|^Y' >/dev/null 2>&1
+  fi
+}
+
+die_with_error()
+{
+  rvm_error "$1"
+  exit "${2:-1}"
+}
+
+expand_ruby_name()
+{
+  "$rvm_scripts_path/tools" strings "$1" \
+    | awk -F"${rvm_gemset_separator:-"@"}" '{print $1}'
+}
+
+existing_ruby_patch()
+{
+  if "$rvm_scripts_path/list" strings | grep "^$1$" >/dev/null
+  then
+    echo "$1"
+  else
+    (
+      rvm_ruby_string="$1"
+      __rvm_ruby_string
+      if "$rvm_scripts_path/list" strings | grep "^${rvm_ruby_interpreter}-${rvm_ruby_version}-" >/dev/null
+      then
+        "$rvm_scripts_path/list" strings | grep "^${rvm_ruby_interpreter}-${rvm_ruby_version}-" | sort | tail -n 1
+      else
+        "$rvm_scripts_path/list" strings | grep "^${rvm_ruby_interpreter}-" | sort | tail -n 1
+      fi
+    )
+  fi
+}
+
+highest_ruby_patch()
+{
+  typeset patch_level _version
+  (
+    rvm_ruby_string=$1
+    __rvm_ruby_string
+
+    patch_level="$(
+      __rvm_db "${rvm_ruby_interpreter}_${rvm_ruby_version}_patch_level"
+    )"
+
+    _version="$(
+      __rvm_db "${rvm_ruby_interpreter}_version"
+    )"
+
+    if [[ -n "${patch_level:-""}" ]]
+    then
+      case "$rvm_ruby_interpreter" in
+        ree|kiji|rbx)
+          # REE, Kiji & Rubinius use dates for their patch levels.
+          rvm_ruby_patch_level="${patch_level}"
+          ;;
+        *)
+          # MRI uses -pN+ to specify the patch level.
+          rvm_ruby_patch_level="p${patch_level}"
+          ;;
+      esac
+
+      echo ${rvm_ruby_interpreter}-${rvm_ruby_version}-${rvm_ruby_patch_level}
+    elif [[ -n "${_version:-""}" ]]
+    then
+      echo ${rvm_ruby_interpreter}-${_version}
+    else
+      echo ${rvm_ruby_interpreter}
+    fi
+  )
+}
+
+upgrade_ruby()
+{
+  [[ -n "$expanded_source"      ]] || die_with_error "The source ruby was not a valid ruby string."
+  [[ -n "$expanded_destination" ]] || die_with_error "The destination ruby was not a valid ruby string."
+
+  if ! confirm \
+    "Are you sure you wish to upgrade from $expanded_source to $expanded_destination?"
+  then
+    die_with_error "Cancelling upgrade."
+  fi
+
+  if [[ ! -d "$rvm_rubies_path/$expanded_destination" ]]
+  then
+    rvm_log "Installing new ruby $expanded_destination"
+
+    if "${rvm_bin_path}/rvm" install "$expanded_destination"
+    then
+      true
+    else
+      die_with_error "Unable to install ruby $expanded_destination. Please install it manually to continue." $?
+    fi
+  fi
+
+  rvm_log "Migrating gems from $expanded_source to $expanded_destination"
+
+  "$rvm_scripts_path/migrate" "$expanded_source" "$expanded_destination" || die_with_error "Error migrating gems." "$result"
+
+  rvm_log "Upgrade complete!"
+}
+
+args=($*)
+
+source_ruby="${args[$__array_start]:-}"
+args[$__array_start]=""
+args=(${args[@]})
+
+destination_ruby="${args[$__array_start]:-}"
+args[$__array_start]=""
+args=(${args[@]})
+
+expanded_source="$(existing_ruby_patch "$source_ruby")"
+
+if [[ -n "$source_ruby" && -z "$destination_ruby" ]]
+then
+  highest_source="$(highest_ruby_patch "$(expand_ruby_name "$source_ruby")")"
+  if [[ "${expanded_source}" != "${highest_source}" ]]
+  then
+    destination_ruby="$(expand_ruby_name "$highest_source")"
+  fi
+fi
+
+if [[ -z "$source_ruby" || -z "$destination_ruby" ]]
+then
+  usage >&2
+  exit 1
+
+elif [[ "help" == "$source_ruby" ]]
+then
+  usage
+
+else
+  expanded_destination="$(expand_ruby_name "$destination_ruby")"
+  upgrade_ruby
+
+fi

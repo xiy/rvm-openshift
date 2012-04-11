@@ -1,0 +1,279 @@
+#!/usr/bin/env bash
+
+unset rvm_default_flag rvm_wrapper_name
+
+source "$rvm_scripts_path/base"
+
+usage() {
+  printf "%b" "
+
+  Usage:
+
+    rvm alias [action] [arguments]
+
+  Examples:
+
+    rvm alias create [alias_name] [ruby]
+    rvm alias delete [alias_name]
+    rvm alias show [alias_name]
+    rvm alias list
+
+"
+}
+
+alias_conflicts_with_ruby() {
+  # If default exists, we should return true.
+  [[ "$1" == "default" && ! -L "$rvm_rubies_path/default" ]] && return 1
+  # Open for suggestions to a better way of doing this...
+  alias_check_result="$(
+    \. "$rvm_scripts_path/initialize"
+    \. "$rvm_scripts_path/selector"
+    \. "$rvm_scripts_path/selector_gemsets"
+    export rvm_ruby_string=\"$1\"
+    __rvm_ruby_string > /dev/null 2>&1
+    echo "$?"
+  )"
+
+  if [[ "0" == "$alias_check_result" ]]; then
+      rvm_error "You have attempted to create an alias called '$1', which is recognized as a rvm ruby."
+    return 0
+  fi
+
+  return 1
+
+  unset alias_check_result
+}
+
+alias_show() {
+  typeset expanded_alias_name
+
+  if [[ -z "$alias_name" ]]
+  then
+    rvm_log "usage: 'rvm alias show [alias_name]'"
+    result=1
+    return
+  fi
+
+  [[ -s "$rvm_path/config/alias" ]] || return 0
+
+  expanded_alias_name="$("$rvm_scripts_path"/db "$rvm_path/config/alias" "$alias_name")"
+
+  if [[ -z "$expanded_alias_name" ]]; then
+    rvm_error "Unknown alias name: '$alias_name'"
+    result=1
+  else
+    result=0
+    if [[ -n "$gemset_name" ]] ; then
+      printf "%b" "${expanded_alias_name}${rvm_gemset_separator:-"@"}${gemset_name}\n"
+    else
+      printf "%b" "${expanded_alias_name}\n"
+    fi
+  fi
+}
+
+alias_after_delete_default()
+{
+  rvm_log "Deleting default links/files"
+
+  for _path in $rvm_bin_path/default_* "$rvm_environments_path/default" "$rvm_wrappers_path/default"
+  do
+    [[ -f "$_path" ]] && rm -rf ${_path}
+  done
+
+  for wrapper in "$rvm_path"/wrappers/default/*
+  do
+    wrapper="${wrapper##*\/}"
+
+    if [[ -L "$rvm_bin_path/${wrapper}" ]]
+    then
+      rm -f "$rvm_bin_path/${wrapper}"
+    fi
+
+    rm -f "$rvm_bin_path/${wrapper}"
+
+    # If the RVM bin path is different from rvm_path/bin, ensure they are
+    # in sync.
+    if [[ "${rvm_bin_path}" != "${rvm_path}/bin" ]]
+    then
+      rm -f "${rvm_path}/bin/${wrapper}"
+    fi
+  done
+}
+
+alias_delete() {
+  rvm_log "Deleting alias: $alias_name"
+
+  for link in "$rvm_rubies_path/$alias_name" ; do
+    if [[ -L "$link" ]] ; then rm -f $link ; fi
+  done
+
+  [[ -s "$rvm_path/config/alias" ]] || return 0
+
+  "$rvm_scripts_path"/db "$rvm_path/config/alias" "$alias_name" "delete"
+
+  if [[ "default" == "$alias_name" ]] ; then
+    alias_after_delete_default
+  fi
+}
+
+alias_after_create_default()
+{
+  rvm_log "Creating default links/files"
+
+  environment_id="${final_environment_identifier}"
+
+  if (( ${rvm_user_install_flag:=0} == 0 ))
+  then
+    # Sets up the default wrappers.
+    "$rvm_scripts_path/wrapper" "$rvm_ruby_string" --no-prefix
+  else
+    "$rvm_scripts_path/wrapper" "$rvm_ruby_string" "default"
+  fi
+
+  RUBY_VERSION="$("$rvm_ruby_home/bin/ruby" -v | \sed 's#^\(.*\) (.*$#\1#')"
+
+  export GEM_HOME GEM_PATH MY_RUBY_HOME RUBY_VERSION
+
+  for _path in "$rvm_environments_path" "$rvm_wrappers_path"
+  do
+    # Remove old default if it exists.
+    [[ -L "$_path/default" ]] && rm -f "$_path/default"
+    # Symlink n the new default
+    \ln -fs "$_path/$environment_id" "$_path/default"
+  done
+
+  # Copy wrapper scripts for the newly set default to the RVM bin path.
+  for wrapper in "$rvm_path"/wrappers/default/*
+  do
+    [[ -r "${wrapper}" ]] || continue
+
+    if [[ -L "$rvm_bin_path/${wrapper##*\/}" ]]
+    then
+      rm -f "$rvm_bin_path/${wrapper##*\/}"
+    fi
+
+    cp -f "$wrapper" "$rvm_bin_path/${wrapper##*\/}"
+
+    # If the RVM bin path is different from rvm_path/bin, ensure they are
+    # in sync.
+    if [[ "${rvm_bin_path}" != "${rvm_path}/bin" ]]
+    then
+      cp -f "${wrapper}" "${rvm_path}/bin/"
+    fi
+  done
+}
+
+alias_create()
+{
+  alias_name="${alias_name:-""}"
+  rvm_ruby_string="$rvm_environment_identifier"
+
+  rvm_expanding_aliases=1
+  __rvm_become
+  unset rvm_expanding_aliases
+
+  if [[ "default" != "$alias_name" ]] && alias_conflicts_with_ruby "$alias_name"
+  then
+    # Force it to an empty alias name to trigger the usage.
+    alias_name=""
+  fi
+
+  if [[ -z "${rvm_environment_identifier:-""}" || -z "$alias_name" ]]
+  then
+    rvm_error "usage: 'rvm alias [alias_name] [ruby_string]'"
+    return 1
+
+  else
+    if [[ -z "$rvm_ruby_string" ]]
+    then
+      rvm_error "Unknown ruby string '$rvm_ruby_string' specified"
+      return 1
+    fi
+
+    if [[ "default" == "$alias_name" ]]
+    then rvm_alias=""
+    fi
+
+    if [[ -z "$rvm_alias" ]]
+    then
+      final_environment_identifier="${rvm_ruby_string:-$(__rvm_env_string)}"
+
+      rvm_log "Creating alias $alias_name for $final_environment_identifier."
+      ln -fs "$rvm_rubies_path/$rvm_ruby_string" "$rvm_rubies_path/$alias_name"
+
+      rvm_log "Recording alias $alias_name for $final_environment_identifier."
+      "$rvm_scripts_path"/db "$rvm_path/config/alias" "$alias_name" "$final_environment_identifier"
+
+      [[ "default" != "$alias_name" ]] || alias_after_create_default
+    else
+
+      if [[ -d "$rvm_rubies_path/$alias_name" ]]
+      then rvm_error "$rvm_rubies_path/$alias_name is taken and is *not* able to be an alias name."
+      else rvm_error "$rvm_rubies_path/$alias_name is already aliased."
+      fi
+      return 1
+    fi
+  fi
+}
+
+alias_list() {
+  typeset item items
+
+  items=($(cd "$rvm_rubies_path" ; find . -maxdepth 1 -mindepth 1 -type l | sed -e 's#./##'))
+
+  for item in "${items[@]}"
+  do
+    echo "$(basename "$item") => $("$rvm_scripts_path"/db "$rvm_path/config/alias" "$(basename "$item")")"
+  done
+}
+
+alias_search_by_target() {
+  typeset item items target search
+  search="${alias_name}@${gemset_name}"
+
+  items=($(cd "$rvm_rubies_path" ; find . -maxdepth 1 -mindepth 1 -type l | sed -e 's#./##'))
+
+  for item in "${items[@]}"
+  do
+    target=$("$rvm_scripts_path"/db "$rvm_path/config/alias" "$(basename "$item")")
+    if [[ "${search}" == "${target}" ]]
+    then
+      echo "$(basename "$item")"
+    fi
+  done
+}
+
+args=($*)
+action="${args[0]:-""}"
+alias_name="${args[1]:-""}"
+rvm_environment_identifier="${args[2]:-""}"
+args="$(echo ${args[@]:3})" # Strip trailing / leading / extra spacing.
+result=0
+
+if [[ ! -f "$rvm_path/config/alias" ]] ; then touch "$rvm_path/config/alias" ; fi
+
+if printf "%b" "$alias_name" | grep "${rvm_gemset_separator:-"@"}" >/dev/null 2>&1 ; then
+  gemset_name="${alias_name/*${rvm_gemset_separator:-"@"}/}"
+  alias_name="${alias_name/${rvm_gemset_separator:-"@"}*/}"
+else
+  gemset_name=""
+fi
+
+if [[ -n "$alias_name" ]] ; then
+  rvm_alias="$("$rvm_scripts_path/db" "$rvm_path/config/alias" "$alias_name")"
+fi
+
+case "$action" in
+  delete|create|list|show|search_by_target)
+    alias_${action}
+    ;;
+  help|usage)
+    usage
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac
+
+exit $?

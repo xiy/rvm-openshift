@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+function bundle_not_found()
+{
+  printf "%b" "$(tput setaf 1)ERROR: Gem bundler is not installed, run \`gem install bundler\` first.$(tput sgr0)\n"
+  exit 127
+}
+
+# in rvm warn about missing gem
+if [[ -n "${GEM_HOME:-}" ]]
+then
+  bundle_not_found
+else
+  current_bundle="$(dirname $(which $0))"
+  export PATH
+  PATH=":${PATH}:"
+  PATH="${PATH//:${current_bundle}:/:}"
+  PATH="${PATH#:}"
+  PATH="${PATH%:}"
+  if [[ -n "${current_bundle}" ]] && builtin command -v bundle >/dev/null 2>&1
+  then
+    builtin command bundle "$@"
+  else
+    bundle_not_found
+  fi
+fi

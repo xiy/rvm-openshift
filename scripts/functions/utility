@@ -1,0 +1,383 @@
+#!/usr/bin/env bash
+
+if [[ -z "${rvm_tar_command:-}" ]] && builtin command -v gtar >/dev/null
+then
+  rvm_tar_command=gtar
+else
+  rvm_tar_command=tar
+fi
+
+if [[ ! " ${rvm_tar_options:-} " =~ " --no-same-owner "  ]] && \
+  $rvm_tar_command --help | \grep -- --no-same-owner >/dev/null
+then
+  rvm_tar_options="${rvm_tar_options:-} --no-same-owner"
+  rvm_tar_options="${rvm_tar_options## }"
+fi
+
+#
+# Functions RVM is built on
+#
+# match <value> <string|glob>
+match()
+{
+  case "$1" in
+    $2) return 0 ;;
+    *)  return 1 ;;
+  esac
+}
+
+printenv_null()
+{
+  if printenv --null >/dev/null 2>/dev/null
+  then
+    printenv --null
+  else
+    # this messes with escape sequences but allows new lines in variables
+    printenv | sed '/=/ { s/=.*$//; p; }; d;' | while read name
+    do
+      zero="\0"
+      eval "eval \"printf '%b' '$name=\$$name$zero'\""
+    done
+  fi
+}
+
+is_a_function() {
+  typeset -f $1 >/dev/null 2>&1 || return $?
+}
+
+#
+# RVM specific functions.
+#
+
+__rvm_warn_on_rubyopt()
+{
+  if [[ -n "${RUBYOPT:-""}" ]]; then
+    rvm_warn \
+      "Please note: You have the RUBYOPT environment variable set and this \
+            may interfere with normal rvm operations. We sugges unsetting it."
+    return 1
+  else
+    return 0
+  fi
+}
+
+__rvm_strings()
+{
+  typeset strings ruby_strings
+
+  ruby_strings=($(echo ${rvm_ruby_args:-$rvm_ruby_string}))
+
+  for rvm_ruby_string in "${ruby_strings[@]}" ; do
+    strings="$strings $(__rvm_select ; echo $rvm_ruby_string)"
+  done
+
+  echo $strings
+
+  return 0
+}
+
+# Return a list of directories under a given base path.
+# Derived from rvm_ruby_string.
+__rvm_ruby_string_paths_under()
+{
+  typeset path part parts
+
+  path="${1%/}" # Strip off any trailing slash
+
+  parts=(${rvm_ruby_string//-/ }) # Strip white space.
+
+  echo "$path"
+
+  for part in "${parts[@]}"
+  do
+    path="$path/$part"
+    echo "$path"
+  done
+
+  return 0
+}
+
+# Run a specified command and log it.
+__rvm_run()
+{
+  typeset name log temp_log_path _command message
+  true ${rvm_debug_flag:=0} ${rvm_niceness:=0}
+
+  name="${1:-}"
+  _command="${2:-}"
+  message="${3:-}"
+
+  if [[ -n "$message" ]]
+  then
+    rvm_log "$message"
+  fi
+
+  if (( rvm_debug_flag > 0 ))
+  then
+    rvm_debug "Executing: $_command"
+  fi
+
+  if [[ -n "${rvm_ruby_string:-}" ]]
+  then
+    temp_log_path="${rvm_log_path}/$rvm_ruby_string"
+  else
+    temp_log_path="${rvm_log_path}"
+  fi
+
+  log="$temp_log_path/$name.log"
+
+  if [[ ! -d "${log%\/*}" ]]
+  then
+    \mkdir -p "${log%\/*}"
+  fi
+
+  if [[ ! -f "$log" ]]
+  then
+    \touch "$log" # for zsh :(
+  fi
+
+  # TODO: Allow an 'append_flag' setting?
+  printf "%b" "[$(date +'%Y-%m-%d %H:%M:%S')] $_command\n" > "$log"
+
+  if (( rvm_niceness > 0 ))
+  then
+    _command="nice -n $rvm_niceness $_command"
+  fi
+
+  eval "$_command" >> "$log" 2>&1
+  result=$?
+
+  if (( result > 0 ))
+  then
+    rvm_error "Error running '$_command', please read $log"
+  fi
+
+  return ${result}
+}
+
+# Output the current ruby's rvm source path.
+__rvm_source_dir()
+{
+  if [[ ${rvm_ruby_selected_flag:-0} -eq 0 ]]
+  then __rvm_select
+  fi
+
+  if [[ -z "$rvm_ruby_src_path" ]]
+  then
+    rvm_error "No source directory exists for the default implementation."
+  else
+    echo "$rvm_ruby_src_path"
+  fi
+
+  return 0
+}
+
+# Output an inspection of selected 'binary' scripts, based on CLI selection.
+__rvm_inspect()
+{
+  for binary in $rvm_ruby_args
+  do
+    actual_file="$(unset -f gem ; builtin command -v gem )"
+    rvm_log "$actual_file:"
+    if [[ ${rvm_shebang_flag:-0} -eq 1 ]]
+    then
+      \head -n 1    < "$actual_file"
+    fi
+
+    if [[ ${rvm_env_flag:-0} -eq 1 ]]
+    then
+      \awk '/ENV/'  < "$actual_file"
+    fi
+
+    if [[ ${rvm_path_flag:-0} -eq 1 ]]
+    then
+      \awk '/PATH/' < "$actual_file"
+    fi
+
+    if [[ ${rvm_head_flag:-0} -eq 1 ]]
+    then
+      \head -n 5    < "$actual_file"
+    fi
+
+    if [[ ${rvm_tail_flag:-0} -eq 1 ]]
+    then
+      \tail -n 5    < "$actual_file"
+    fi
+
+    if [[ ${rvm_all_flag:-0} -eq 1 ]]
+    then
+      \cat $actual_file
+    fi
+  done
+
+  return 0
+}
+
+# Strip whitespace and normalize it all.
+__rvm_strip()
+{
+  \sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/[[:space:]]\{1,\}/ /g'
+  return $?
+}
+
+__rvm_remove_from_path()
+{
+  export PATH
+  PATH=":$PATH:"
+  PATH="${PATH//:$1:/:}"
+  PATH="${PATH//::/:}"
+  PATH="${PATH%:}"
+  PATH="${PATH#:}"
+}
+
+__rvm_add_to_path()
+{
+  export PATH
+
+  if (( $# != 2 )) || [[ -z "$2" ]]
+  then
+    rvm_error "__rvm_add_to_path requires two parameters"
+    return 1
+  fi
+
+  __rvm_remove_from_path "$2"
+  case "$1" in
+    prepend) PATH="$2:$PATH" ;;
+    append)  PATH="$PATH:$2" ;;
+    #*) anything else will just remove it from PATH - not adding back
+  esac
+
+  if [[ -n "${rvm_user_path_prefix:-}" ]]
+  then
+    __rvm_remove_from_path "${rvm_user_path_prefix}"
+    PATH="${rvm_user_path_prefix}:$PATH"
+  fi
+
+  builtin hash -r
+}
+
+is_parent_of()
+{
+  typeset name pid ppid pname
+  name=$1
+  pid=$2
+  while [[ -n "$pid" && "$pid" != "0" ]]
+  do
+    read ppid pname < <(ps -p $pid -o ppid= -o comm=)
+    if [[ -n "$ppid" && -n "$pname" ]]
+    then
+      if [[ "$pname" == "$name" ]]
+      then
+        echo $pid
+        return 0
+      else
+        pid=$ppid
+      fi
+    else
+      break
+    fi
+  done
+  return 1
+}
+
+rvm_is_a_shell_function()
+{
+  if (( ${rvm_is_not_a_shell_function:-0} > 0 )) && [[ "${1:-}" != "no_warning" ]]
+  then
+    if rvm_pretty_print stderr
+    then
+      printf "%b" "\n${rvm_notify_clr:-}RVM is not a function, selecting rubies with '${rvm_error_clr:-}rvm use ...${rvm_notify_clr:-}' will not work.${rvm_reset_clr:-}\n" >&2
+    else
+      printf "%b" "\nRVM is not a function, selecting rubies with 'rvm use ...' will not work.\n" >&2
+    fi
+    if is_parent_of gnome-terminal $$ >/dev/null
+    then
+      rvm_log "Please visit https://rvm.io/integration/gnome-terminal/ for a solution.\n" >&2
+    else
+      rvm_log "You need to change your terminal settings to allow shell login.
+Please visit https://rvm.io/workflow/screen/ for example.\n" >&2
+    fi
+  fi
+  return ${rvm_is_not_a_shell_function:-0}
+}
+
+__rvm_detect_xcode_version()
+{
+  typeset version_file
+
+  for version_file in \
+    /Applications/Xcode.app/Contents/version.plist \
+    /Developer/Applications/Xcode.app/Contents/version.plist
+  do
+    if [[ -f $version_file ]]
+    then
+      if [[ -x /usr/libexec/PlistBuddy ]]
+      then
+        /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" $version_file
+      else
+        sed -n '/<key>CFBundleShortVersionString<\/key>/{n; s/^.*>\(.*\)<.*$/\1/; p;}' < $version_file
+      fi
+      return 0
+    fi
+  done
+
+  if builtin command -v xcodebuild >/dev/null
+  then
+    xcodebuild -version | sed -n '/Xcode/ {s/Xcode //; p;}'
+  fi
+}
+
+__rvm_detect_xcode_version_is()
+{
+  [[ "$(__rvm_detect_xcode_version)" == "$1" ]] || return 1
+}
+
+__rvm_version_compare()
+{
+  typeset v1d v2d dots counter IFS
+  typeset -a transformer
+
+  counter=1
+  IFS="+" # to put + in transformer ;)
+  v1d=$( printf -- $1 | \grep -o '\.' | wc -l )
+  v2d=$( printf -- $3 | \grep -o '\.' | wc -l )
+
+  if [[ $v1d -ge $v2d ]]
+  then dots=$v1d
+  else dots=$v2d
+  fi
+
+  while (( dots >= 0 ))
+  do transformer+=( "$(( 256 ** dots-- ))*\$$((counter++))" )
+  done
+
+  eval "$(
+    printf '[[ ';
+    printf $1 | \awk -F. "{ printf ${transformer[*]} }";
+    printf -- " $2 ";
+    printf $3 | \awk -F. "{ printf ${transformer[*]} }";
+    printf ' ]]'
+  )"
+}
+
+__function_on_stack()
+{
+  typeset fun
+  for fun in "$@"
+  do
+    if [[ " ${FUNCNAME[*]} " =~ " $fun " ]]
+    then return 0
+    fi
+  done
+  return $#
+}
+
+__rvm_pager_or_cat_v()
+{
+  typeset -a _pager
+  if [[ -n "${PAGER:-}" ]]
+  then _pager=( "${PAGER}" )
+  else _pager=( "cat" "-v" )
+  fi
+  "${_pager[@]}" "$@"
+}
