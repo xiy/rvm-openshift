@@ -3,7 +3,7 @@
 if (( ${rvm_ignore_rvmrc:=0} == 0 ))
 then
   declare rvmrc
-  for rvmrc in /etc/rvmrc "$HOME/.rvmrc"
+  for rvmrc in /etc/rvmrc "$OPENSHIFT_DATA_DIR/.rvmrc"
   do
     if [[ -f "$rvmrc" ]]
     then
@@ -29,8 +29,8 @@ if [[ -z "${rvm_path:-}" ]]
 then
   if (( UID == 0 )) && [[ -d "/usr/local/rvm" ]]
   then rvm_path="/usr/local/rvm"
-  elif [[ -d "${HOME}/.rvm" ]]
-  then rvm_path="${HOME}/.rvm"
+  elif [[ -d "${OPENSHIFT_DATA_DIR}/.rvm" ]]
+  then rvm_path="${OPENSHIFT_DATA_DIR}/.rvm"
   elif [[ -d "/usr/local/rvm" ]]
   then rvm_path="/usr/local/rvm"
   else echo "Can't find rvm install!" 1>&2 ; exit 1
