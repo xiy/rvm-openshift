@@ -39,8 +39,8 @@ Options
 
 Actions
 
-  master - Install RVM master branch from wayneeseguin rvm repo (Default).
-  stable - Install RVM stable branch from wayneeseguin rvm repo.
+  master - Install RVM master branch from xiy rvm repo (Default).
+  stable - Install RVM stable branch from xiy rvm repo.
   help   - Display CLI help (this output)
 
 Branches:
@@ -53,7 +53,7 @@ Branches:
   Defaults:
 
     branch: master
-    repo:   wayneeseguin
+    repo:   xiy
 
 "
 }
@@ -64,7 +64,7 @@ Branches:
 # fetch_version "" -> 2.0.1
 fetch_version()
 {
-  curl -s https://api.github.com/repos/wayneeseguin/rvm/tags |
+  curl -s https://api.github.com/repos/xiy/rvm/tags |
     sed -n '/"name": / {s/^.*".*": "\(.*\)".*$/\1/; p;}' |
     sort -t. -k 1,1n -k 2,2n -k 3,3n -k 4,4n -k 5,5n |
     grep "^${1:-}" | tail -n 1
@@ -76,9 +76,9 @@ install_release()
   _version=$1
   log "Downloading RVM version ${_version}"
   get_and_unpack \
-    https://github.com/wayneeseguin/rvm/tarball/${_version} \
+    https://github.com/xiy/rvm/tarball/${_version} \
     rvm-${_version}.tar.gz \
-    wayneeseguin-rvm-
+    xiy-rvm-
 }
 
 install_head()
@@ -86,7 +86,7 @@ install_head()
   typeset _repo _branch
   case "$1" in
     (/*)
-      _repo=wayneeseguin
+      _repo=xiy
       _branch=${1#/}
       ;;
     (*/)
@@ -98,7 +98,7 @@ install_head()
       _branch=${1#*/}
       ;;
     (*)
-      _repo=wayneeseguin
+      _repo=xiy
       _branch=$1
       ;;
   esac
@@ -208,7 +208,7 @@ then
     rvm_path="$OPENSHIFT_DATA_DIR/.rvm"
   fi
 fi
-export HOME rvm_path
+export $OPENSHIFT_DATA_DIR rvm_path
 
 install_rubies=()
 install_gems=()
