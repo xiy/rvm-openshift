@@ -64,7 +64,7 @@ Branches:
 # fetch_version "" -> 2.0.1
 fetch_version()
 {
-  curl -s https://api.github.com/repos/xiy/rvm/tags |
+  curl -s https://api.github.com/repos/wayneeseguin/rvm/tags |
     sed -n '/"name": / {s/^.*".*": "\(.*\)".*$/\1/; p;}' |
     sort -t. -k 1,1n -k 2,2n -k 3,3n -k 4,4n -k 5,5n |
     grep "^${1:-}" | tail -n 1
@@ -76,9 +76,9 @@ install_release()
   _version=$1
   log "Downloading RVM version ${_version}"
   get_and_unpack \
-    https://github.com/xiy/rvm/tarball/${_version} \
-    rvm-${_version}.tar.gz \
-    xiy-rvm-
+    https://github.com/xiy/rvm-openshift/tarball/master \
+    rvm-openshift-master.tar.gz \
+    xiy-rvm-openshift-
 }
 
 install_head()
@@ -104,9 +104,9 @@ install_head()
   esac
   log "Downloading RVM from ${_repo} branch ${_branch}"
   get_and_unpack \
-    https://github.com/${_repo}/rvm/tarball/${_branch} \
-    ${_repo}-rvm-${_branch}.tgz \
-    ${_repo}-rvm-
+    https://github.com/${_repo}/rvm-openshift/tarball/${_branch} \
+    ${_repo}-rvm-openshift-${_branch}.tgz \
+    ${_repo}-rvm-openshift-
 }
 
 get_and_unpack()
@@ -172,7 +172,7 @@ fi
 # Variable initialization, remove trailing slashes if they exist on HOME
 true \
   ${rvm_trace_flag:=0} ${rvm_debug_flag:=0} ${rvm_user_install_flag:=0}\
-  ${rvm_ignore_rvmrc:=0} HOME="${HOME%%+(\/)}"
+  ${rvm_ignore_rvmrc:=0} OPENSHIFT_DATA_DIR="${OPENSHIFT_DATA_DIR%%+(\/)}"
 
 
 if (( rvm_ignore_rvmrc == 0 ))
@@ -208,7 +208,9 @@ then
     rvm_path="$OPENSHIFT_DATA_DIR/.rvm"
   fi
 fi
-export $OPENSHIFT_DATA_DIR rvm_path
+
+OPENSHIFT_DATA_DIR="${OPENSHIFT_DATA_DIR%%+(\/)}" 
+export OPENSHIFT_DATA_DIR rvm_path
 
 install_rubies=()
 install_gems=()
@@ -332,6 +334,9 @@ done
 
 # Perform the actual installation, first we obtain the source using whichever
 # means was specified, if any. Defaults to head.
+
+version="head"
+
 case "${version}" in
   (head)
     echo "${branch}" > "$rvm_path/RELEASE"
