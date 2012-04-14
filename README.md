@@ -3,24 +3,15 @@
 A customised version of RVM that uses the non-standard install locations and environment variables in use on the RedHat OpenShift service.
 
 ## Installing
-  
-    $ curl -L https://raw.github.com/xiy/rvm-openshift/master/binscripts/install-rvm-openshift.sh | bash -s
 
-Because of the limitations in place on the OpenShift system, you cannot have RVM inserted as a bash function through ~/.bash_profile, so you'll need to run the following command any time you wish to use RVM through SSH access:
-  
-    $ source $OPENSHIFT_DATA_DIR/.rvm/scripts/rvm
+There's now a detailed guide written on my blog here: bit.ly/HHp9aQ
 
-## Using SSH with OpenShift
+## Credits & Contributions
 
-To SSH into your OpenShift app box, find your SSH connection details using the rhc tools gem:
-  
-    $ rhc-user-info -l <email> -p <password>
+RVM - I've merely edited some of the variables in the scripts, so all credit for RVM goes to the contributors and original developers of this awesome piece of software.
 
-It should look something like the following:
-  
-    bf7ef3ac5@appname-namespace.rhcloud.com
+OpenShift - Red Hat are quickly changing the game when it comes to PaaS cloud services. When it goes open-source soon, It'll be even better!
 
-Then use this info to SSH into your box:
-  
-    $ ssh bf7ef3ac5@appname-namespace.rhcloud.com
-    $ <password> type...type...type...
+I'm no expert when it comes to bash/ruby and still learning, so if you spot any bugs or want to improve it, please feel free!
+
+~ @xiy
