@@ -28,7 +28,7 @@ make && make install &
 wait $!
 
 echo "=== Installing RVM and Ruby 1.9.3..."
-curl -L ${rvm_installer} | bash -s master --ruby &
+curl -sSL ${rvm_installer} | bash -s master --ruby &
 wait $!
 
 echo "=== ALL DONE ==="
